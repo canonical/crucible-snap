@@ -1,0 +1,77 @@
+name: crucible
+base: core24
+confinement: strict
+lint:
+  ignore:
+    - metadata
+platforms:
+  amd64:
+    build-on: [amd64]
+  arm64:
+    build-on: [arm64]
+version: 'git'
+license: MIT
+summary: Mesa Crucible Vulkan Test Suite
+description: |
+  Baseline snap for the Mesa Crucible Vulkan test suite. Builds the crucible
+  test binary from source via Meson and ships an executable for running tests.
+
+plugs:
+  gpu-2404:
+    interface: content
+    target: $SNAP/gpu-2404
+    default-provider: mesa-2404
+
+apps:
+  test:
+    command: test
+    plugs:
+      - opengl
+      - gpu-2404
+  list-tests:
+    command: list_tests
+
+parts:
+  test-conformance:
+    source: bin/
+    plugin: dump
+    stage:
+      - test
+
+  list-tests:
+    source: bin/
+    plugin: dump
+    stage:
+      - list_tests
+
+  crucible-tests:
+    plugin: nil
+    source: https://gitlab.freedesktop.org/mesa/crucible.git
+    source-type: git
+    build-attributes:
+      - enable-patchelf
+    build-packages:
+      - build-essential
+      - cmake
+      - python3-pip
+      - python3-opencv
+      - meson
+      - glslang-tools
+      - pkg-config
+      - libpng-dev
+      - libxml2-dev
+      - libvulkan-dev
+      - mesa-common-dev
+    stage-packages:
+      - libvulkan1
+      - libpng16-16t64
+      - libxml2
+    override-build: |
+      set -eux
+
+      meson setup bin
+      ninja -C bin
+
+      mkdir -p "${CRAFT_PART_INSTALL}/usr/bin/"
+      cp "${CRAFT_PART_BUILD}/bin/crucible" "${CRAFT_PART_INSTALL}/usr/bin/"
+      cp -r "${CRAFT_PART_SRC}/data" "${CRAFT_PART_INSTALL}/usr/bin/data"

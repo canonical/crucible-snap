@@ -1,0 +1,31 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+    echo "Usage: crucible.test <test-pattern>"
+    echo ""
+    echo "Examples:"
+    echo "  crucible.test func.spirv.foo"
+    echo "  crucible.test 'func.spirv.*'"
+    echo "  crucible.test func"
+    exit 1
+fi
+
+# Set up Vulkan ICD and libraries from gpu-2404 content interface
+if [ -d "${SNAP}/gpu-2404" ]; then
+    case "${SNAP_ARCH}" in
+        amd64) GPU_ARCH=x86_64;  ARCH_TRIPLE=x86_64-linux-gnu ;;
+        arm64) GPU_ARCH=aarch64; ARCH_TRIPLE=aarch64-linux-gnu ;;
+        *)     GPU_ARCH="${SNAP_ARCH}"; ARCH_TRIPLE="${SNAP_ARCH}-linux-gnu" ;;
+    esac
+    export VK_ICD_FILENAMES
+    VK_ICD_FILENAMES=$(ls "${SNAP}/gpu-2404/usr/share/vulkan/icd.d/"*"${GPU_ARCH}"*.json 2>/dev/null | tr '\n' ':')
+    export LD_LIBRARY_PATH="${SNAP}/gpu-2404/usr/lib/${ARCH_TRIPLE}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+fi
+
+# Create a working directory for test results
+WORK_DIR="${HOME}/.crucible"
+mkdir -p "${WORK_DIR}"
+
+"${SNAP}/usr/bin/crucible" run \
+    --junit-xml="${WORK_DIR}/results.xml" \
+    "$1"

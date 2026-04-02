@@ -64,8 +64,6 @@ parts:
     plugin: nil
     source: https://gitlab.freedesktop.org/mesa/crucible.git
     source-type: git
-    build-attributes:
-      - enable-patchelf
     build-packages:
       - build-essential
       - cmake

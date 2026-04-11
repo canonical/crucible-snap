@@ -1,0 +1,9 @@
+#!/bin/bash
+
+echo "Available crucible tests:"
+echo ""
+"${SNAP}/usr/bin/crucible" ls-tests
+echo ""
+echo "Usage examples:"
+echo "  crucible.test func.spirv.foo"
+echo "  crucible.test 'func.*'"

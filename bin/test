@@ -1,7 +1,20 @@
 #!/bin/bash
 
+SNAP="${SNAP:-/snap/crucible/current}"
+
+NO_CONFINEMENT=0
+ARGS=()
+for arg in "$@"; do
+    if [ "${arg}" = "--no-confinement" ]; then
+        NO_CONFINEMENT=1
+    else
+        ARGS+=("${arg}")
+    fi
+done
+set -- "${ARGS[@]}"
+
 if [ -z "$1" ]; then
-    echo "Usage: crucible.test <test-pattern>"
+    echo "Usage: crucible.test [--no-confinement] <test-pattern> [crucible-args...]"
     echo ""
     echo "Examples:"
     echo "  crucible.test func.spirv.foo"
@@ -10,22 +23,42 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-# Set up Vulkan ICD and libraries from gpu-2404 content interface
-if [ -d "${SNAP}/gpu-2404" ]; then
-    case "${SNAP_ARCH}" in
-        amd64) GPU_ARCH=x86_64;  ARCH_TRIPLE=x86_64-linux-gnu ;;
-        arm64) GPU_ARCH=aarch64; ARCH_TRIPLE=aarch64-linux-gnu ;;
-        *)     GPU_ARCH="${SNAP_ARCH}"; ARCH_TRIPLE="${SNAP_ARCH}-linux-gnu" ;;
-    esac
-    export VK_ICD_FILENAMES
-    VK_ICD_FILENAMES=$(ls "${SNAP}/gpu-2404/usr/share/vulkan/icd.d/"*"${GPU_ARCH}"*.json 2>/dev/null | tr '\n' ':')
-    export LD_LIBRARY_PATH="${SNAP}/gpu-2404/usr/lib/${ARCH_TRIPLE}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+ARCH="${SNAP_ARCH:-$(dpkg --print-architecture)}"
+case "$ARCH" in
+    amd64) GPU_ARCH=x86_64;  ARCH_TRIPLE=x86_64-linux-gnu ;;
+    arm64) GPU_ARCH=aarch64; ARCH_TRIPLE=aarch64-linux-gnu ;;
+    *)     GPU_ARCH="${ARCH}"; ARCH_TRIPLE="${ARCH}-linux-gnu" ;;
+esac
+
+if [ "${NO_CONFINEMENT}" = "1" ]; then
+    # Use host drivers exclusively.
+    # LD_PRELOAD overrides snap-bundled libraries loaded via DT_RPATH, which
+    # takes precedence over LD_LIBRARY_PATH for dlopen'd ICD dependencies.
+    HOST_VK="/usr/lib/${ARCH_TRIPLE}/libvulkan.so.1"
+    if [ ! -f "$HOST_VK" ]; then
+        echo "Error: --no-confinement requires the host Vulkan loader at $HOST_VK"
+        echo "Install libvulkan1 (or equivalent) on the host before using this mode."
+        exit 1
+    fi
+    HOST_WL="/usr/lib/${ARCH_TRIPLE}/libwayland-client.so.0"
+    export LD_PRELOAD="${HOST_VK}${HOST_WL:+:${HOST_WL}}"
+    export LD_LIBRARY_PATH="/usr/lib/${ARCH_TRIPLE}:/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
+else
+    # Set up Vulkan ICD and libraries from gpu-2404 content interface.
+    # Skipped when VK_ICD_FILENAMES is already set by the caller so that
+    # host ICDs and their library dependencies are used instead of the
+    # snap-bundled ones.
+    if [ -d "${SNAP}/gpu-2404" ] && [ -z "${VK_ICD_FILENAMES:-}" ]; then
+        case "${SNAP_ARCH}" in
+            amd64) GPU_ARCH=x86_64;  ARCH_TRIPLE=x86_64-linux-gnu ;;
+            arm64) GPU_ARCH=aarch64; ARCH_TRIPLE=aarch64-linux-gnu ;;
+            *)     GPU_ARCH="${SNAP_ARCH}"; ARCH_TRIPLE="${SNAP_ARCH}-linux-gnu" ;;
+        esac
+        export VK_ICD_FILENAMES
+        VK_ICD_FILENAMES=$(ls "${SNAP}/gpu-2404/usr/share/vulkan/icd.d/"*"${GPU_ARCH}"*.json 2>/dev/null | tr '\n' ':')
+        export LD_LIBRARY_PATH="${SNAP}/gpu-2404/usr/lib/${ARCH_TRIPLE}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    fi
 fi
 
-# Create a working directory for test results
-WORK_DIR="${HOME}/.crucible"
-mkdir -p "${WORK_DIR}"
-
-"${SNAP}/usr/bin/crucible" run \
-    --junit-xml="${WORK_DIR}/results.xml" \
-    "$1"
+"${SNAP}/usr/bin/crucible" run "$@"

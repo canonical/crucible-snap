@@ -9,6 +9,8 @@ platforms:
     build-on: [amd64]
   arm64:
     build-on: [arm64]
+  riscv64:
+    build-on: [riscv64, amd64]
 version: 'git'
 license: MIT
 summary: Mesa Crucible Vulkan Test Suite
@@ -72,10 +74,6 @@ parts:
       - meson
       - glslang-tools
       - pkg-config
-      - libpng-dev
-      - libxml2-dev
-      - libvulkan-dev
-      - mesa-common-dev
     stage-packages:
       - libvulkan1
       - libpng16-16t64
@@ -84,7 +82,91 @@ parts:
     override-build: |
       set -eux
 
+      BUILD_ARCH="${CRAFT_ARCH:-$(dpkg --print-architecture)}"
+      TARGET_ARCH="${CRAFT_TARGET_ARCH:-${BUILD_ARCH}}"
+
+      if [ "${TARGET_ARCH}" = "${BUILD_ARCH}" ]; then
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        libvulkan-dev \
+        libpng-dev \
+        libxml2-dev \
+        mesa-common-dev
       meson setup bin
+      else
+      case "${TARGET_ARCH}" in
+      riscv64)
+      TARGET_TRIPLE="riscv64-linux-gnu"
+      ;;
+      *)
+      echo "Unsupported cross target: ${TARGET_ARCH}" >&2
+      exit 1
+      ;;
+      esac
+
+      dpkg --add-architecture "${TARGET_ARCH}"
+      mkdir -p /etc/apt/sources.disabled
+      find /etc/apt/sources.list.d -mindepth 1 -maxdepth 1 -exec mv -f {} /etc/apt/sources.disabled/ \;
+      if [ -f /etc/apt/sources.list ]; then
+      mv -f /etc/apt/sources.list /etc/apt/sources.disabled/sources.list
+      fi
+      cat > /etc/apt/sources.list.d/crucible-cross.sources <<'EOF'
+      Types: deb
+      URIs: http://archive.ubuntu.com/ubuntu
+      Suites: noble noble-updates noble-backports
+      Components: main restricted universe multiverse
+      Architectures: amd64
+      Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+      Types: deb
+      URIs: http://security.ubuntu.com/ubuntu
+      Suites: noble-security
+      Components: main restricted universe multiverse
+      Architectures: amd64
+      Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+      Types: deb
+      URIs: http://ports.ubuntu.com/ubuntu-ports
+      Suites: noble noble-updates noble-security
+      Components: main restricted universe multiverse
+      Architectures: riscv64
+      Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+      EOF
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        "gcc-${TARGET_TRIPLE}" \
+        "binutils-${TARGET_TRIPLE}" \
+        "libc6-dev-${TARGET_ARCH}-cross" \
+        "linux-libc-dev-${TARGET_ARCH}-cross" \
+        "libvulkan-dev:${TARGET_ARCH}" \
+        "libpng-dev:${TARGET_ARCH}" \
+        "libxml2-dev:${TARGET_ARCH}" \
+        "mesa-common-dev:${TARGET_ARCH}"
+
+      cat > "${CRAFT_PART_BUILD}/meson-cross-${TARGET_ARCH}.txt" <<'EOF'
+      [binaries]
+      c = 'riscv64-linux-gnu-gcc'
+      ar = 'riscv64-linux-gnu-gcc-ar'
+      strip = 'riscv64-linux-gnu-strip'
+      pkg_config = 'pkg-config'
+      [host_machine]
+      system = 'linux'
+      cpu_family = 'riscv'
+      cpu = 'riscv64'
+      endian = 'little'
+      [properties]
+      needs_exe_wrapper = false
+      EOF
+
+      unset CC CXX CFLAGS CPPFLAGS LDFLAGS PKG_CONFIG PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_PATH
+      export PKG_CONFIG=pkg-config
+      export PKG_CONFIG_LIBDIR="/usr/lib/${TARGET_TRIPLE}/pkgconfig:/usr/share/pkgconfig"
+      export CFLAGS="-isystem /usr/${TARGET_TRIPLE}/include"
+      export CPPFLAGS="-isystem /usr/${TARGET_TRIPLE}/include"
+      export LDFLAGS="-L/usr/lib/${TARGET_TRIPLE}"
+      meson setup bin --cross-file "${CRAFT_PART_BUILD}/meson-cross-${TARGET_ARCH}.txt"
+      fi
+
       ninja -C bin
 
       mkdir -p "${CRAFT_PART_INSTALL}/usr/bin/"

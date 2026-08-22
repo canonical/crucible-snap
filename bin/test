@@ -25,9 +25,9 @@ fi
 
 ARCH="${SNAP_ARCH:-$(dpkg --print-architecture)}"
 case "$ARCH" in
-    amd64) GPU_ARCH=x86_64;  ARCH_TRIPLE=x86_64-linux-gnu ;;
-    arm64) GPU_ARCH=aarch64; ARCH_TRIPLE=aarch64-linux-gnu ;;
-    *)     GPU_ARCH="${ARCH}"; ARCH_TRIPLE="${ARCH}-linux-gnu" ;;
+    amd64) ARCH_TRIPLE=x86_64-linux-gnu ;;
+    arm64) ARCH_TRIPLE=aarch64-linux-gnu ;;
+    *)     ARCH_TRIPLE="${ARCH}-linux-gnu" ;;
 esac
 
 if [ "${NO_CONFINEMENT}" = "1" ]; then
@@ -43,22 +43,16 @@ if [ "${NO_CONFINEMENT}" = "1" ]; then
     HOST_WL="/usr/lib/${ARCH_TRIPLE}/libwayland-client.so.0"
     export LD_PRELOAD="${HOST_VK}${HOST_WL:+:${HOST_WL}}"
     export LD_LIBRARY_PATH="/usr/lib/${ARCH_TRIPLE}:/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-
-else
-    # Set up Vulkan ICD and libraries from gpu-2404 content interface.
-    # Skipped when VK_ICD_FILENAMES is already set by the caller so that
-    # host ICDs and their library dependencies are used instead of the
-    # snap-bundled ones.
-    if [ -d "${SNAP}/gpu-2404" ] && [ -z "${VK_ICD_FILENAMES:-}" ]; then
-        case "${SNAP_ARCH}" in
-            amd64) GPU_ARCH=x86_64;  ARCH_TRIPLE=x86_64-linux-gnu ;;
-            arm64) GPU_ARCH=aarch64; ARCH_TRIPLE=aarch64-linux-gnu ;;
-            *)     GPU_ARCH="${SNAP_ARCH}"; ARCH_TRIPLE="${SNAP_ARCH}-linux-gnu" ;;
-        esac
-        export VK_ICD_FILENAMES
-        VK_ICD_FILENAMES=$(ls "${SNAP}/gpu-2404/usr/share/vulkan/icd.d/"*"${GPU_ARCH}"*.json 2>/dev/null | tr '\n' ':')
-        export LD_LIBRARY_PATH="${SNAP}/gpu-2404/usr/lib/${ARCH_TRIPLE}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-    fi
+    exec "${SNAP}/usr/bin/crucible" run "$@"
 fi
 
-"${SNAP}/usr/bin/crucible" run "$@"
+# Set up the Vulkan ICD and driver libraries from the gpu-2404 content
+# interface via its provider wrapper, which discovers ICDs (through
+# XDG_DATA_DIRS) and configures LD_LIBRARY_PATH, layers, etc. Skipped when
+# VK_ICD_FILENAMES is already set so caller-provided host ICDs are used.
+GPU_WRAPPER="${SNAP}/gpu-2404/bin/gpu-2404-provider-wrapper"
+if [ -x "${GPU_WRAPPER}" ] && [ -z "${VK_ICD_FILENAMES:-}" ]; then
+    exec "${GPU_WRAPPER}" "${SNAP}/usr/bin/crucible" run "$@"
+fi
+
+exec "${SNAP}/usr/bin/crucible" run "$@"

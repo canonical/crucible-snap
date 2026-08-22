@@ -4,11 +4,21 @@ confinement: strict
 lint:
   ignore:
     - metadata
+    # Binaries are static; Vulkan/Mesa libs come from gpu-2404 at runtime.
+    - library:
+        - usr/bin/*
+        - usr/lib/*/gconv/*.so
+        - usr/lib/*/*.so*
 platforms:
   amd64:
     build-on: [amd64]
+    build-for: [amd64]
   arm64:
     build-on: [arm64]
+    build-for: [arm64]
+  riscv64:
+    build-on: [riscv64, amd64]
+    build-for: [riscv64]
 version: 'git'
 license: MIT
 summary: Mesa Crucible Vulkan Test Suite
@@ -39,6 +49,15 @@ apps:
       - gpu-2404
       - x11
 
+package-repositories:
+  - type: apt
+    architectures: [riscv64, arm64]
+    formats: [deb, deb-src]
+    components: [main, universe]
+    suites: [noble, noble-updates, noble-security, noble-backports]
+    key-id: F6ECB3762474EDA9D21B7022871920D1991BC93C
+    url: http://ports.ubuntu.com/ubuntu-ports
+
 parts:
   gpu-2404-wrapper:
     source: bin/
@@ -64,27 +83,73 @@ parts:
     plugin: nil
     source: https://gitlab.freedesktop.org/mesa/crucible.git
     source-type: git
+    build-environment:
+      - PKG_CONFIG_PATH: "/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/pkgconfig:/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_ON/pkgconfig:/usr/share/pkgconfig"
     build-packages:
       - build-essential
       - cmake
+      - ninja-build
       - python3-pip
       - python3-opencv
       - meson
       - glslang-tools
       - pkg-config
-      - libpng-dev
-      - libxml2-dev
-      - libvulkan-dev
-      - mesa-common-dev
+      - libvulkan-dev:$CRAFT_ARCH_BUILD_FOR
+      - libpng-dev:$CRAFT_ARCH_BUILD_FOR
+      - libxml2-dev:$CRAFT_ARCH_BUILD_FOR
+      - mesa-common-dev:$CRAFT_ARCH_BUILD_FOR
+      - on amd64 to riscv64:
+          - gcc-riscv64-linux-gnu
+          - binutils-riscv64-linux-gnu
+          - libc6-dev-riscv64-cross
+          - linux-libc-dev-riscv64-cross
     stage-packages:
-      - libvulkan1
-      - libpng16-16t64
-      - libxml2
-      - vulkan-tools
+      - libvulkan1:$CRAFT_ARCH_BUILD_FOR
+      - libpng16-16t64:$CRAFT_ARCH_BUILD_FOR
+      - libxml2:$CRAFT_ARCH_BUILD_FOR
+      - vulkan-tools:$CRAFT_ARCH_BUILD_FOR
     override-build: |
       set -eux
 
-      meson setup bin
+      if [ "$CRAFT_ARCH_BUILD_ON" = "$CRAFT_ARCH_BUILD_FOR" ]; then
+        meson setup bin
+      else
+        TARGET_TRIPLE="$CRAFT_ARCH_TRIPLET_BUILD_FOR"
+        case "$CRAFT_ARCH_BUILD_FOR" in
+          riscv64)
+            CPU_FAMILY="riscv"
+            CPU="riscv64"
+            ;;
+          *)
+            echo "Unsupported cross target: $CRAFT_ARCH_BUILD_FOR" >&2
+            exit 1
+            ;;
+        esac
+
+        cat > "${CRAFT_PART_BUILD}/meson-cross-${CRAFT_ARCH_BUILD_FOR}.txt" <<EOF
+      [binaries]
+      c = '${TARGET_TRIPLE}-gcc'
+      ar = '${TARGET_TRIPLE}-gcc-ar'
+      strip = '${TARGET_TRIPLE}-strip'
+      pkg_config = 'pkg-config'
+      [host_machine]
+      system = 'linux'
+      cpu_family = '${CPU_FAMILY}'
+      cpu = '${CPU}'
+      endian = 'little'
+      [properties]
+      needs_exe_wrapper = false
+      EOF
+
+        unset CC CXX CFLAGS CPPFLAGS LDFLAGS PKG_CONFIG PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_LIBDIR PKG_CONFIG_PATH
+        export PKG_CONFIG=pkg-config
+        export PKG_CONFIG_PATH="/usr/lib/${TARGET_TRIPLE}/pkgconfig:/usr/share/pkgconfig"
+        export CFLAGS="-isystem /usr/${TARGET_TRIPLE}/include"
+        export CPPFLAGS="-isystem /usr/${TARGET_TRIPLE}/include"
+        export LDFLAGS="-L/usr/lib/${TARGET_TRIPLE}"
+        meson setup bin --cross-file "${CRAFT_PART_BUILD}/meson-cross-${CRAFT_ARCH_BUILD_FOR}.txt"
+      fi
+
       ninja -C bin
 
       mkdir -p "${CRAFT_PART_INSTALL}/usr/bin/"

@@ -4,6 +4,11 @@ confinement: strict
 lint:
   ignore:
     - metadata
+    # Binaries are static; Vulkan/Mesa libs come from gpu-2404 at runtime.
+    - library:
+        - usr/bin/*
+        - usr/lib/*/gconv/*.so
+        - usr/lib/*/*.so*
 platforms:
   amd64:
     build-on: [amd64]

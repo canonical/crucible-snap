@@ -70,6 +70,7 @@ parts:
       - build-essential
       - cmake
       - python3-pip
+      - python3-mako
       - python3-opencv
       - meson
       - glslang-tools

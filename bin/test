@@ -25,9 +25,9 @@ fi
 
 ARCH="${SNAP_ARCH:-$(dpkg --print-architecture)}"
 case "$ARCH" in
-    amd64) GPU_ARCH=x86_64;  ARCH_TRIPLE=x86_64-linux-gnu ;;
-    arm64) GPU_ARCH=aarch64; ARCH_TRIPLE=aarch64-linux-gnu ;;
-    *)     GPU_ARCH="${ARCH}"; ARCH_TRIPLE="${ARCH}-linux-gnu" ;;
+    amd64) ARCH_TRIPLE=x86_64-linux-gnu ;;
+    arm64) ARCH_TRIPLE=aarch64-linux-gnu ;;
+    *)     ARCH_TRIPLE="${ARCH}-linux-gnu" ;;
 esac
 
 if [ "${NO_CONFINEMENT}" = "1" ]; then
@@ -43,22 +43,8 @@ if [ "${NO_CONFINEMENT}" = "1" ]; then
     HOST_WL="/usr/lib/${ARCH_TRIPLE}/libwayland-client.so.0"
     export LD_PRELOAD="${HOST_VK}${HOST_WL:+:${HOST_WL}}"
     export LD_LIBRARY_PATH="/usr/lib/${ARCH_TRIPLE}:/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-
-else
-    # Set up Vulkan ICD and libraries from gpu-2404 content interface.
-    # Skipped when VK_ICD_FILENAMES is already set by the caller so that
-    # host ICDs and their library dependencies are used instead of the
-    # snap-bundled ones.
-    if [ -d "${SNAP}/gpu-2404" ] && [ -z "${VK_ICD_FILENAMES:-}" ]; then
-        case "${SNAP_ARCH}" in
-            amd64) GPU_ARCH=x86_64;  ARCH_TRIPLE=x86_64-linux-gnu ;;
-            arm64) GPU_ARCH=aarch64; ARCH_TRIPLE=aarch64-linux-gnu ;;
-            *)     GPU_ARCH="${SNAP_ARCH}"; ARCH_TRIPLE="${SNAP_ARCH}-linux-gnu" ;;
-        esac
-        export VK_ICD_FILENAMES
-        VK_ICD_FILENAMES=$(ls "${SNAP}/gpu-2404/usr/share/vulkan/icd.d/"*"${GPU_ARCH}"*.json 2>/dev/null | tr '\n' ':')
-        export LD_LIBRARY_PATH="${SNAP}/gpu-2404/usr/lib/${ARCH_TRIPLE}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-    fi
 fi
+# Otherwise the gpu-2404 command-chain wrapper has already set up the Vulkan
+# ICDs and libraries from the mesa-2404 content snap.
 
 "${SNAP}/usr/bin/crucible" run "$@"

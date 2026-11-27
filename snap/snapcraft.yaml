@@ -25,6 +25,8 @@ plugs:
 apps:
   test:
     command: test
+    command-chain:
+      - bin/gpu-2404-wrapper
     plugs:
       - opengl
       - gpu-2404

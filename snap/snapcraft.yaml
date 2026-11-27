@@ -25,6 +25,8 @@ plugs:
 apps:
   test:
     command: test
+    command-chain:
+      - bin/gpu-2404-wrapper
     plugs:
       - opengl
       - gpu-2404
@@ -68,6 +70,7 @@ parts:
       - build-essential
       - cmake
       - python3-pip
+      - python3-mako
       - python3-opencv
       - meson
       - glslang-tools

@@ -6,6 +6,10 @@ on:
     branches:
       - 'main'
   workflow_dispatch:
+  # Crucible is built from upstream HEAD, so upstream changes can break the
+  # build or the tests without any commit here.
+  schedule:
+    - cron: '0 2 * * *'
 
 jobs:
   build:
@@ -28,6 +32,57 @@ jobs:
           name: vulkan-cts-snap-${{ matrix.arch }}
           path: ${{ steps.build.outputs.snap }}
 
+      # The runners have no GPU; run the snap on Mesa's software Vulkan
+      # driver (lavapipe) from mesa-2404 so a broken Vulkan setup inside the
+      # snap (e.g. the test app missing the gpu-2404 wrapper) fails here.
+      - name: Install snap
+        run: |
+          set -euo pipefail
+          sudo snap install mesa-2404
+          sudo snap install --dangerous "${{ steps.build.outputs.snap }}"
+          sudo snap connect crucible:gpu-2404 mesa-2404:gpu-2404
+
+      - name: Smoke test on lavapipe
+        env:
+          VK_ICD_FILENAMES: /snap/crucible/current/gpu-2404/usr/share/vulkan/icd.d/lvp_icd.json
+        run: |
+          set -euo pipefail
+          unset DISPLAY WAYLAND_DISPLAY
+          crucible.vulkaninfo --summary > vulkaninfo.txt
+          cat vulkaninfo.txt
+          if ! grep -Eq 'driverName += llvmpipe' vulkaninfo.txt; then
+            echo "::error::crucible.vulkaninfo did not find the lavapipe device"
+            exit 1
+          fi
+          # Groups that pass on lavapipe. bug.*, example.*, func.memory-fd.*,
+          # func.memory_budget and func.sync.* have expected failures there.
+          for pattern in \
+            'func.depthstencil.*' \
+            'func.miptree.r8g8b8a8-unorm.aspect-color.*' \
+            'func.buffer.*' \
+            'func.compute.*' \
+            'func.mesh.*' \
+            'func.shader.*' \
+            'stress.*'; do
+            echo "::group::crucible.test $pattern"
+            rc=0
+            crucible.test "$pattern" > crucible.txt 2>&1 || rc=$?
+            cat crucible.txt
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::crucible.test '$pattern' exited with $rc"
+              exit 1
+            fi
+            if ! grep -Eq '^crucible: info +: pass [1-9]' crucible.txt; then
+              echo "::error::crucible.test '$pattern' passed no tests"
+              exit 1
+            fi
+          done
+
+      - name: Remove snap
+        if: always()
+        run: sudo snap remove --purge crucible || true
+
   publish:
     name: Publish to edge (${{ matrix.arch }})
     strategy:
@@ -35,7 +90,8 @@ jobs:
         arch: [x64, arm64]
     runs-on: [self-hosted, linux, "${{ matrix.arch }}", large]
     needs: build
-    if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+    # Scheduled runs only check that upstream HEAD still builds and passes.
+    if: github.event_name != 'pull_request' && github.event_name != 'schedule' && github.ref_name == github.event.repository.default_branch
     steps:
       - name: Download artifact
         uses: actions/download-artifact@v4
